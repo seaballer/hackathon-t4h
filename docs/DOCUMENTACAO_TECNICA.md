@@ -16,6 +16,7 @@ Guia para construir, em outro repositório, o **cliente e os agentes** que opera
 2. [Arquitetura de referência](#2-arquitetura-de-referência)
 3. [Contrato de conexão MCP](#3-contrato-de-conexão-mcp)
 4. [Ferramentas](#4-ferramentas)
+   - 4.8 [Resumo: Como atua a base de dados](#48-resumo-como-atua-a-base-de-dados)
 5. [Bases de dados](#5-bases-de-dados)
 6. [Inventário: máquina de estados e regras](#6-inventário-máquina-de-estados-e-regras)
 7. [Eventos, relógio e automações do mundo](#7-eventos-relógio-e-automações-do-mundo)
@@ -367,6 +368,41 @@ Regras:
 - Parâmetros: `de` (opcional; padrão é o próprio `agente`), `para`, `mensagem`.
 - Só aparece no painel e no log. Não entrega nada e não conta como ação de evento.
 - É a forma recomendada de tornar visível a coordenação entre agentes.
+
+---
+
+## 4.8 Resumo: Como atua a base de dados
+
+A base de dados é o **estado compartilhado do mundo** — um repositório central que todos os agentes consultam e atualizam para coordenar ações. Funciona como a "fonte da verdade" durante toda a simulação.
+
+#### Fluxo de operação
+
+1. **Leitura (consulta):** Agentes chamam `consultar` para buscar registros por filtro ou busca textual. Não há limite de leituras; todas são seguras e não geram conflito.
+2. **Escrita (atualização):** Agentes chamam `atualizar` para modificar campos específicos de um registro. Cada atualização é **atômica** — ou sucede completamente ou falha com `409` (conflito) ou `422` (dados inválidos).
+3. **Rastreamento:** Toda ação (ferramenta executada) é registrada no campo `acoes` do evento, com `{ferramenta, agente, agora}`. Isso permite auditoria completa.
+4. **Idempotência:** Se uma ação falhar com `504`, o agente deve **conferir o estado antes de repetir**. O servidor pode ter executado a ação antes de responder o erro.
+
+#### Bases principais
+
+- **`eventos`**: Caixa de entrada do time. Cresce conforme chegam pedidos, manutenções e mensagens. Agentes leem, respondem e marcam como `respondido`.
+- **`mensagens`**: Livro-caixa de e-mails enviados. Serve para conferir se um envio foi bem-sucedido após um `504`.
+- **`inventario`**: Catálogo de 150 equipamentos (notebooks, monitores, headsets, etc.). Rastreia status (`disponível`, `alocado`, `reservado`, etc.) e situação (`novo`, `usado`, `quebrado`, etc.).
+- **`colaboradores`**: Nómina de 40 pessoas. Inclui datas de entrada/saída para validar quem pode receber equipamento.
+- **`catalogo_compra`**: Tabela de preços e prazos para os 5 tipos de equipamento.
+- **`regras`**: 8 regras de negócio que validam operações (ex.: não alocar a mesma máquina para duas pessoas).
+- **`compras`**: Histórico de compras realizadas via portal do fornecedor. Cresce conforme o time faz pedidos.
+
+#### Permissões
+
+- **Nenhuma base aceita `registrar`** no Tema 3 — todas respondem `405`. Para criar registros, use o portal do fornecedor (compras) ou `atualizar` (devoluções no inventário).
+- Apenas `eventos` e `inventario` aceitam `atualizar`. Em `eventos`, só `status` e `observacao`; em `inventario`, campos como `status`, `situacao`, `com_quem`, `marca`, `modelo`, etc.
+- Todas as bases aceitam `consultar` sem restrição.
+
+#### Ciclo de vida
+
+- O relógio começa na **primeira chamada** de qualquer agente e avança conforme eventos são processados.
+- Após 22 dias simulados, `proximo_evento` retorna `encerrado: true`. Leituras continuam; ações devolvem `410`.
+- Reiniciar o servidor zera tudo.
 
 ---
 
