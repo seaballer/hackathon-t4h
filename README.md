@@ -168,6 +168,21 @@ python main.py --mcp-url http://192.168.1.100:8765/mcp
 
 ## Resiliência
 
+### Conexão MCP
+
+O cliente usa o protocolo MCP Streamable HTTP em `--mcp-url`: abre uma sessão
+(`initialize`), envia `notifications/initialized` e chama as ferramentas
+JSON-RPC do servidor. Respostas JSON e SSE são aceitas. O agente é identificado
+como `orquestrador`; para testar a conexão sem iniciar o grafo, use:
+
+```bash
+python -c "from src.mcp_client import MCPClient; c=MCPClient(); c.initialize(); print(c.listar_bases()); c.close()"
+```
+
+O servidor disponibiliza operações genéricas como `consultar`, `atualizar`,
+`registrar` e `responder_evento`. Ações da aplicação sem uma operação equivalente
+no servidor são reportadas como erro, em vez de serem tratadas como sucesso.
+
 ### Retry
 - 503 Service Unavailable: retry com backoff exponencial (0.5s, 1s, 2s)
 - Máximo 4 tentativas

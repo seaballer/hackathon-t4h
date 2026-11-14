@@ -61,9 +61,11 @@ def main():
     logger.info("=== Iniciando Time de Agentes ===")
     logger.info(f"MCP URL: {args.mcp_url}")
 
+    mcp = None
     try:
         # Inicializar componentes
         mcp = MCPClient(base_url=args.mcp_url)
+        mcp.initialize(agente="orquestrador")
         llm = LLMClient()
         clock = Clock()
         regras = RegrasEquipamentos({})
@@ -156,6 +158,9 @@ def main():
     except Exception as e:
         logger.error(f"Erro fatal: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        if mcp is not None:
+            mcp.close()
 
 
 if __name__ == "__main__":

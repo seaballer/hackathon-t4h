@@ -17,7 +17,15 @@ def node(state: AgentState) -> AgentState:
     """
     logger.info(f"Analisando aprovação para evento {state['evento_id']}...")
     
-    bloqueios = state.get("bloqueios", [])
+    bloqueios = list(state.get("bloqueios", []))
+    for acao in state.get("plano", []):
+        nivel = acao.get("nivel")
+        if nivel != "FAZ_SOZINHO":
+            bloqueios.append(
+                f"{acao.get('tool', 'ação')}: nível {nivel or 'não definido'} "
+                "requer aprovação humana; fila de aprovação indisponível."
+            )
+    state["bloqueios"] = bloqueios
     
     if bloqueios:
         state["aprovado"] = False

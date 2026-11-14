@@ -224,6 +224,18 @@ def test_aprovar_com_bloqueios(base_state):
     assert result["aprovado"] is False
 
 
+def test_aprovar_nao_executa_acao_que_exige_aprovacao(base_state):
+    base_state["bloqueios"] = []
+    base_state["plano"] = [
+        {"tool": "propor_emprestimo", "nivel": "PROPOE"}
+    ]
+
+    result = aprovar.node(base_state)
+
+    assert result["aprovado"] is False
+    assert "aprovação humana" in result["bloqueios"][0]
+
+
 # Testes do Nó 7: Executar
 def test_executar_plano_aprovado(base_state, mocks):
     """Testa execução de plano aprovado."""
@@ -258,6 +270,118 @@ def test_executar_plano_nao_aprovado(base_state, mocks):
     assert len(result.get("acoes_feitas", [])) == 0
 
 
+def test_executar_reserva_kit_seleciona_e_reserva_item(base_state, mocks):
+    base_state["aprovado"] = True
+    base_state["plano"] = [{
+        "tool": "reservar_kit",
+        "nivel": "FAZ_SOZINHO",
+        "args": {
+            "colaborador_id": "C-019",
+            "itens": ["notebook"],
+        },
+    }]
+    mocks["mcp"].consultar_inventario.return_value = {
+        "itens": [{
+            "patrimonio": "EQ-0007",
+            "status": "disponível",
+            "situacao": "usado",
+            "com_quem": "",
+        }]
+    }
+
+    result = executar.node(base_state, mocks["mcp"], mocks["llm"])
+
+    assert len(result["acoes_feitas"]) == 1
+    mocks["mcp"].atualizar.assert_called_once_with(
+        "inventario",
+        "EQ-0007",
+        {"status": "reservado", "com_quem": "C-019"},
+        evento_id="TEST-001",
+    )
+
+
+def test_executar_entrada_reserva_kit_padrao_por_area(base_state, mocks):
+    base_state["aprovado"] = True
+    base_state["plano"] = [{
+        "tool": "registrar_entrada",
+        "nivel": "FAZ_SOZINHO",
+        "args": {"colaborador_id": "C-019"},
+    }]
+    mocks["mcp"].consultar_colaborador.return_value = {
+        "colaborador": {"id": "C-019", "area": "Desenvolvimento"}
+    }
+    mocks["mcp"].consultar.return_value = {
+        "registros": [
+            {"regra": "kit_padrao", "valor": ["notebook", "headset"]},
+            {"regra": "kit_extra_por_area", "valor": {"Desenvolvimento": ["monitor"]}},
+        ]
+    }
+    mocks["mcp"].consultar_inventario.side_effect = [
+        {"itens": [{
+            "patrimonio": f"EQ-{index}",
+            "status": "disponível",
+            "situacao": "novo",
+            "com_quem": "",
+        }]}
+        for index in range(3)
+    ]
+
+    result = executar.node(base_state, mocks["mcp"], mocks["llm"])
+
+    assert len(result["acoes_feitas"]) == 1
+    assert mocks["mcp"].atualizar.call_count == 3
+    assert [call.args[1] for call in mocks["mcp"].atualizar.call_args_list] == [
+        "EQ-0",
+        "EQ-1",
+        "EQ-2",
+    ]
+
+
+def test_executar_entrega_compra_atualiza_itens_em_transito(base_state, mocks):
+    base_state["aprovado"] = True
+    base_state["plano"] = [{
+        "tool": "registrar_entrega_compra",
+        "nivel": "FAZ_SOZINHO",
+        "args": {"itens": [{"patrimonio": "EQ-0007"}]},
+    }]
+    mocks["mcp"].consultar_inventario.return_value = {
+        "itens": [{
+            "patrimonio": "EQ-0007",
+            "status": "em_transito",
+            "situacao": "",
+        }]
+    }
+
+    result = executar.node(base_state, mocks["mcp"], mocks["llm"])
+
+    assert len(result["acoes_feitas"]) == 1
+    mocks["mcp"].atualizar.assert_called_once_with(
+        "inventario",
+        "EQ-0007",
+        {
+            "status": "disponível",
+            "situacao": "novo",
+            "com_quem": "",
+        },
+        evento_id="TEST-001",
+    )
+
+
+def test_executar_entrega_compra_nao_finge_cadastro_de_item(base_state, mocks):
+    base_state["aprovado"] = True
+    base_state["plano"] = [{
+        "tool": "registrar_entrega_compra",
+        "nivel": "FAZ_SOZINHO",
+        "args": {"itens": []},
+    }]
+
+    result = executar.node(base_state, mocks["mcp"], mocks["llm"])
+
+    assert result["acoes_feitas"] == []
+    assert "não permite registrar novos itens" in result["erros"][0]
+    mocks["mcp"].atualizar.assert_not_called()
+
+
 # Testes do Nó 8: Registrar
 def test_registrar_acoes(base_state):
     """Testa registro de ações."""
@@ -282,6 +406,11 @@ def test_responder_com_acoes(base_state, mocks):
     result = responder.node(base_state, mocks["llm"], mocks["mcp"])
     
     assert result["resposta_remetente"] == "Resposta redigida"
+    mocks["mcp"].responder_evento.assert_called_once_with(
+        "TEST-001",
+        "Resposta redigida",
+        motivo="Resposta final do agente",
+    )
 
 
 def test_responder_sem_acoes(base_state, mocks):
@@ -291,3 +420,18 @@ def test_responder_sem_acoes(base_state, mocks):
     result = responder.node(base_state, mocks["llm"], mocks["mcp"])
     
     assert "resposta_remetente" in result
+    mocks["mcp"].responder_evento.assert_called_once_with(
+        "TEST-001",
+        "Sua solicitação foi recebida e será processada.",
+        motivo="Resposta final do agente",
+    )
+
+
+def test_responder_nao_confirma_quando_acao_falha(base_state, mocks):
+    base_state["plano"] = [{"tool": "alocar_item"}]
+    base_state["acoes_feitas"] = []
+
+    result = responder.node(base_state, mocks["llm"], mocks["mcp"])
+
+    assert result["resposta_remetente"] == ""
+    mocks["mcp"].responder_evento.assert_not_called()
