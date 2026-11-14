@@ -4,9 +4,12 @@
 
 Este documento analisa como conectar o servidor MCP (Streamable HTTP em `http://localhost:8765/mcp`) ao cliente LangGraph. O servidor é o "mundo" — ele não chama o agente, o agente chama o servidor.
 
-**Status atual:** Cliente MCP implementado em `src/mcp_client.py` com retry, idempotência e circuit breaker.
+**Status atual:** Cliente MCP implementado em `src/mcp_client.py`. O handshake
+e `tools/list` foram validados contra o servidor ativo; JSON e SSE também estão
+cobertos por testes com transporte simulado.
 
-**Próximos passos:** Validar handshake, testar ferramentas, implementar reconexão.
+**Próximos passos:** Expandir a reconexão de sessão e validar operações de
+escrita sem executar ações que dependem de aprovação humana.
 
 ---
 
@@ -51,11 +54,11 @@ Este documento analisa como conectar o servidor MCP (Streamable HTTP em `http://
 | Componente | Responsabilidade | Status |
 |-----------|-----------------|--------|
 | **MCPClient** | HTTP client com retry, idempotência, circuit breaker | ✅ Implementado |
-| **Handshake** | Initialize → guardar Session-Id → initialized | ⏳ Precisa validar |
+| **Handshake** | Initialize → guardar Session-Id → initialized | ✅ Implementado e validado |
 | **Session Management** | Reutilizar Session-Id, reconectar em falha | ⏳ Parcial |
 | **Tool Calling** | Chamar ferramentas com envelope correto | ✅ Implementado |
-| **Error Handling** | Tratar falhas simuladas, retry, circuit breaker | ✅ Implementado |
-| **Idempotência** | Cache baseado em evento_id + tool + args | ✅ Implementado |
+| **Error Handling** | Retry para 503 e circuit breaker; demais status sem estratégia específica | ⏳ Parcial |
+| **Idempotência** | Cache local em memória para algumas operações de escrita | ⏳ Parcial |
 
 ---
 
@@ -127,16 +130,20 @@ Erro (status 400+):
 
 | Ferramenta | Entrada | Saída | Uso |
 |-----------|---------|-------|-----|
-| **proximo_evento** | `agente`, `esperar_segundos` | evento com `tipo`, `origem`, `dados` | Laço principal |
+| **proximo_evento** | `agente`, `esperar_segundos` | evento ou `evento=null` / `encerrado` | Laço principal |
+| **listar_eventos** | `agente`, `status`, `limite`, `offset` | eventos paginados | Histórico/backlog |
 | **ler_evento** | `agente`, `evento_id` | evento completo | Detalhes de um evento |
-| **listar_eventos** | `agente`, `filtro` | lista de eventos | Histórico |
-| **consultar** | `agente`, `base`, `filtro` | registros | Inventário, colaboradores, etc |
-| **atualizar** | `agente`, `base`, `chave`, `dados` | confirmação | Mudar estado |
-| **responder_evento** | `agente`, `evento_id`, `resposta` | confirmação | Responder a dúvidas |
-| **enviar_mensagem** | `agente`, `para`, `assunto`, `corpo` | confirmação | Notificações |
+| **responder_evento** | `agente`, `evento_id`, `mensagem` | confirmação | Responder ao remetente |
+| **enviar_mensagem** | `agente`, `para`, `mensagem`; `assunto` opcional | confirmação | Notificações |
+| **listar_bases** | `agente` | schemas e regras das bases | Descoberta de dados |
+| **consultar** | `agente`, `base`, `filtro`, `busca`, `limite`, `offset` | registros paginados | Inventário, colaboradores, catálogo, etc |
 | **registrar** | `agente`, `base`, `dados` | confirmação | Criar novo registro |
-| **registrar_conversa** | `agente`, `evento_id`, `participantes`, `resumo` | confirmação | Deixar visível no painel |
-| **catalogo_compra** | `agente`, `filtro` | produtos | Buscar itens para compra |
+| **atualizar** | `agente`, `base`, `id`, `dados` | confirmação | Mudar estado |
+| **registrar_conversa** | `agente`, `para`, `mensagem`; `de` opcional | confirmação | Deixar conversa visível no painel |
+
+`catalogo_compra` é uma **base consultável** por `consultar(base="catalogo_compra")`,
+não uma ferramenta MCP própria. A compra continua dependendo do portal do
+fornecedor; não há ferramenta de compra no servidor MCP.
 
 ### 3.2 Exemplo: proximo_evento
 
@@ -199,10 +206,9 @@ Erro (status 400+):
 - Fecha após 3 segundos
 - Previne cascata de falhas
 
-✅ **Idempotência**
-- Cache baseado em MD5(evento_id + tool + args)
-- Evita duplicação de efeitos
-- Importante para operações críticas
+⚠️ **Idempotência limitada**
+- Cache SHA-256 em memória para algumas operações de escrita.
+- Não sobrevive a reinício do processo nem persiste estado `pendente/feito` em SQLite.
 
 ✅ **Timeout configurável**
 - Padrão: 15 segundos
@@ -211,159 +217,56 @@ Erro (status 400+):
 ### 4.2 Métodos disponíveis
 
 ```python
-mcp = MCPClient(base_url="http://localhost:8765/mcp", timeout=15)
+mcp = MCPClient(base_url="http://localhost:8765/mcp", timeout=15,
+                agente="orquestrador")
 
 # Laço principal
-resposta = mcp.proximo_evento(agente="orquestrador", esperar_segundos=30)
+resposta = mcp.proximo_evento(esperar_segundos=30)
 
 # Consultas
-inventario = mcp.consultar(agente="estoque", base="inventario", filtro={...})
+inventario = mcp.consultar("inventario", filtro={...})
+eventos = mcp.listar_eventos(status="lido", limite=50)
+catalogo = mcp.consultar_catalogo_compra()
 
 # Atualizações
-mcp.atualizar(agente="estoque", base="inventario", chave="PAT-001", dados={...})
+mcp.atualizar("inventario", "PAT-001", dados={...})
 
 # Respostas
-mcp.responder_evento(agente="atendimento", evento_id="EVT-001", resposta="...")
+mcp.responder_evento("EVT-001", resposta="...")
 
 # Mensagens
-mcp.enviar_mensagem(agente="supervisor", para="andre@example.com", 
-                    assunto="Aprovação", corpo="...")
+mcp.enviar_mensagem("andre@example.com", assunto="Aprovação", corpo="...")
 
 # Registro de conversas
-mcp.registrar_conversa(agente="orquestrador", evento_id="EVT-001",
-                       participantes=["orquestrador", "estoque"],
-                       resumo="Decidimos aprovar a compra")
+mcp.registrar_conversa(para="executor", mensagem="Kit reservado",
+                       de="analista")
 ```
+
+### 4.3 Execução de ações do plano
+
+- `reservar_kit` e `registrar_entrada` reservam itens disponíveis já cadastrados
+  no inventário para o colaborador. Sem itens explícitos, a entrada usa
+  `kit_padrao` e `kit_extra_por_area` da base `regras`.
+- `registrar_entrega_compra` só atualiza patrimônios existentes com status
+  `em_transito`; o MCP não permite cadastrar novos itens no inventário.
+- O catálogo pode ser consultado pela base `catalogo_compra`, mas não há
+  ferramenta para efetuar compra. O portal do fornecedor segue fora do escopo.
+- Ações com nível diferente de `FAZ_SOZINHO` ficam bloqueadas até existir um
+  fluxo de aprovação humana.
 
 ---
 
 ## 5. O que Precisa Ser Validado/Implementado
 
-### 5.1 Handshake Completo ⏳
+### 5.1 Handshake Completo ✅
 
-**Status:** Parcialmente implementado
+**Status:** Implementado em `src/mcp_client.py` e validado contra o servidor
+ativo com `initialize`, `notifications/initialized` e `tools/list`.
 
-**O que falta:**
-1. Método `initialize()` que:
-   - Envia `{ "method": "initialize", "params": {...} }`
-   - Extrai `Mcp-Session-Id` do header
-   - Armazena para usar em todas as requisições
+### 5.2 Tratamento de SSE ✅
 
-2. Método `send_initialized()` que:
-   - Envia `{ "method": "notifications/initialized" }`
-   - Confirma que o cliente está pronto
-
-3. Reconexão automática:
-   - Se Session-Id expirar, refazer handshake
-   - Detectar quando servidor reinicia
-
-**Código necessário:**
-
-```python
-class MCPClient:
-    def __init__(self, base_url: str, timeout: int = 15):
-        self.base_url = base_url
-        self.timeout = timeout
-        self.session_id: Optional[str] = None
-        self.client = httpx.Client(timeout=timeout)
-    
-    def initialize(self, agente: str) -> bool:
-        """Faz handshake com o servidor MCP."""
-        try:
-            response = self.client.post(
-                f"{self.base_url}",
-                json={
-                    "jsonrpc": "2.0",
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "clientInfo": {
-                            "name": agente,
-                            "version": "1.0.0"
-                        }
-                    }
-                }
-            )
-            
-            # Extrair Session-Id do header
-            self.session_id = response.headers.get("Mcp-Session-Id")
-            if not self.session_id:
-                logger.error("Servidor não retornou Mcp-Session-Id")
-                return False
-            
-            logger.info(f"Handshake bem-sucedido. Session-Id: {self.session_id}")
-            
-            # Enviar initialized
-            return self.send_initialized()
-        
-        except Exception as e:
-            logger.error(f"Erro no initialize: {e}")
-            return False
-    
-    def send_initialized(self) -> bool:
-        """Notifica ao servidor que o cliente está pronto."""
-        try:
-            response = self.client.post(
-                f"{self.base_url}",
-                json={
-                    "jsonrpc": "2.0",
-                    "method": "notifications/initialized"
-                },
-                headers={"Mcp-Session-Id": self.session_id}
-            )
-            
-            if response.status_code == 202:
-                logger.info("Servidor confirmou initialized")
-                return True
-            
-            logger.warning(f"Resposta inesperada: {response.status_code}")
-            return False
-        
-        except Exception as e:
-            logger.error(f"Erro ao enviar initialized: {e}")
-            return False
-    
-    def _fazer_requisicao(self, method: str, endpoint: str, data: Dict) -> Dict:
-        """Adiciona Session-Id a todas as requisições."""
-        headers = {}
-        if self.session_id:
-            headers["Mcp-Session-Id"] = self.session_id
-        
-        # ... resto do código de retry ...
-```
-
-### 5.2 Tratamento de SSE ⏳
-
-**Status:** Não implementado
-
-**O problema:** O servidor pode retornar Server-Sent Events em vez de JSON puro.
-
-**Formato SSE:**
-```
-event: message
-data: {"status": "ok", "resultado": {...}}
-
-event: message
-data: {"status": "ok", "resultado": {...}}
-```
-
-**Solução:** Usar `httpx.stream()` para ler SSE:
-
-```python
-def _fazer_requisicao_stream(self, endpoint: str, data: Dict) -> Dict:
-    """Faz requisição e lida com SSE."""
-    url = f"{self.base_url}{endpoint}"
-    headers = {"Mcp-Session-Id": self.session_id} if self.session_id else {}
-    
-    with self.client.stream("POST", url, json=data, headers=headers) as response:
-        for line in response.iter_lines():
-            if line.startswith("data: "):
-                json_str = line[6:]  # Remove "data: "
-                return json.loads(json_str)
-    
-    raise Exception("Nenhuma resposta recebida")
-```
+**Status:** O cliente aceita JSON e decodifica respostas SSE completas. A leitura
+é bufferizada (`response.text`); não há consumo incremental de streams longos.
 
 ### 5.3 Reconexão Automática ⏳
 
@@ -405,38 +308,35 @@ def _fazer_requisicao(self, method: str, endpoint: str, data: Dict) -> Dict:
 ```python
 def test_proximo_evento():
     """Testa se proximo_evento retorna evento válido."""
-    mcp = MCPClient()
-    mcp.initialize(agente="orquestrador")
+    mcp = MCPClient(agente="orquestrador")
+    mcp.initialize()
     
-    resposta = mcp.proximo_evento(agente="orquestrador", esperar_segundos=5)
+    resposta = mcp.proximo_evento(esperar_segundos=5)
     
     assert resposta["status"] == "ok"
-    assert "resultado" in resposta
-    assert "evento_id" in resposta["resultado"] or resposta["resultado"].get("encerrado")
+    assert "evento" in resposta or resposta.get("encerrado")
 
 def test_consultar():
     """Testa se consultar retorna registros."""
-    mcp = MCPClient()
-    mcp.initialize(agente="estoque")
+    mcp = MCPClient(agente="estoque")
+    mcp.initialize()
     
     resposta = mcp.consultar(
-        agente="estoque",
-        base="inventario",
+        "inventario",
         filtro={}
     )
     
     assert resposta["status"] == "ok"
-    assert "registros" in resposta["resultado"]
+    assert "registros" in resposta
 
 def test_atualizar():
     """Testa se atualizar muda estado."""
-    mcp = MCPClient()
-    mcp.initialize(agente="estoque")
+    mcp = MCPClient(agente="estoque")
+    mcp.initialize()
     
     resposta = mcp.atualizar(
-        agente="estoque",
-        base="inventario",
-        chave="PAT-001",
+        "inventario",
+        "PAT-001",
         dados={"estado": "em_uso"}
     )
     
@@ -540,20 +440,18 @@ def node(state: AgentState, mcp: MCPClient, clock: Clock) -> AgentState:
 
 ## 7. Checklist de Implementação
 
-### Fase 1: Handshake ✅ → ⏳
+### Fase 1: Handshake ✅
 
-- [ ] Implementar `initialize(agente: str) -> bool`
-- [ ] Implementar `send_initialized() -> bool`
-- [ ] Extrair e armazenar `Mcp-Session-Id`
-- [ ] Testar handshake com servidor real
-- [ ] Adicionar logging detalhado
+- [x] Implementar `initialize()`
+- [x] Extrair e armazenar `Mcp-Session-Id`
+- [x] Enviar `notifications/initialized`
+- [x] Validar handshake com o servidor ativo
 
-### Fase 2: Tratamento de SSE ⏳
+### Fase 2: Tratamento de SSE ✅
 
-- [ ] Implementar `_fazer_requisicao_stream()`
-- [ ] Detectar formato de resposta (JSON vs SSE)
-- [ ] Testar com servidor em modo SSE
-- [ ] Adicionar timeout para SSE
+- [x] Detectar e decodificar respostas JSON e SSE completas
+- [x] Cobrir SSE com transporte simulado
+- [ ] Implementar leitura incremental de streams longos, se necessário
 
 ### Fase 3: Reconexão ⏳
 

@@ -167,6 +167,26 @@ def test_montar_plano_alocacao(base_state, mocks):
     assert result["plano"][0]["tool"] == "alocar_item"
 
 
+def test_montar_plano_baixa_usa_nivel_de_escala(base_state, mocks):
+    base_state["tipo"] = "baixa"
+    base_state["evento_id"] = "EVT-001"
+    base_state["entidades"] = {"patrimonio": "PAT-001"}
+    mocks["regras"].nivel_autonomia.return_value = "ESCALA"
+
+    result = montar_plano.node(base_state, mocks["regras"])
+
+    assert result["plano"][0]["nivel"] == "ESCALA"
+
+
+def test_montar_plano_evento_desconhecido_escala(base_state, mocks):
+    base_state["tipo"] = "outro"
+    base_state["evento_id"] = "EVT-001"
+
+    result = montar_plano.node(base_state, mocks["regras"])
+
+    assert result["plano"][0]["nivel"] == "ESCALA"
+
+
 # Testes do Nó 5: Validar
 def test_validar_plano_valido(base_state, mocks):
     """Testa validação de plano válido."""

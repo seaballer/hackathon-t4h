@@ -160,7 +160,7 @@ def node(state: AgentState, regras: RegrasEquipamentos) -> AgentState:
                         "patrimonio": entidades["patrimonio"]
                     },
                     "motivo": "Baixar item",
-                    "nivel": "PROPOE"
+                    "nivel": regras.nivel_autonomia(tipo)
                 })
         
         # Entrega de compra: registrar
@@ -180,8 +180,8 @@ def node(state: AgentState, regras: RegrasEquipamentos) -> AgentState:
             plano.append({
                 "tool": "responder_evento",
                 "args": {"evento_id": evento_id},
-                "motivo": "Responder evento desconhecido",
-                "nivel": "FAZ_SOZINHO"
+                "motivo": "Escalar evento desconhecido",
+                "nivel": "ESCALA"
             })
         
         state["plano"] = plano
