@@ -11,6 +11,24 @@ import litellm
 logger = logging.getLogger(__name__)
 
 
+def _extrair_json(texto: str) -> Dict[str, Any]:
+    """
+    Lê o JSON devolvido pelo modelo. Aceita resposta pura, dentro de bloco
+    ```json ... ``` ou com texto antes/depois do objeto.
+    """
+    texto = (texto or "").strip()
+    if texto.startswith("```"):
+        texto = texto.split("\n", 1)[1] if "\n" in texto else ""
+        texto = texto.rsplit("```", 1)[0]
+    try:
+        return json.loads(texto)
+    except json.JSONDecodeError:
+        inicio, fim = texto.find("{"), texto.rfind("}")
+        if inicio != -1 and fim > inicio:
+            return json.loads(texto[inicio:fim + 1])
+        raise ValueError(f"Resposta do LLM não contém JSON: {texto[:200]!r}")
+
+
 class LLMClient:
     """Cliente para chamadas ao LLM com cache e fallback."""
 
@@ -23,6 +41,12 @@ class LLMClient:
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.api_base = os.getenv("LITELLM_API_BASE")
+        # O LiteLLM acrescenta "/chat/completions" sozinho; se a URL do .env
+        # já vier com esse sufixo, a chamada vira .../chat/completions/chat/completions (404).
+        if self.api_base:
+            self.api_base = self.api_base.rstrip("/")
+            if self.api_base.endswith("/chat/completions"):
+                self.api_base = self.api_base[: -len("/chat/completions")]
         self.model = model
 
         # Detecta modo offline se:
@@ -103,7 +127,7 @@ Regras de negócio:
                 max_tokens=500
             )
 
-            resultado = json.loads(response.choices[0].message.content)
+            resultado = _extrair_json(response.choices[0].message.content)
             self.tokens_usados += response.usage.completion_tokens
             self.falhas_consecutivas = 0
 
@@ -205,7 +229,8 @@ Reanalise o evento com cuidado extra, considerando o motivo da reanalise."""
 
 Motivo da reanalise: {motivo}
 
-Classifique novamente o tipo e extraia as entidades com máxima precisão."""
+Classifique novamente o tipo e extraia as entidades com máxima precisão.
+Responda APENAS com JSON no formato {"tipo": "...", "confianca": 0.0, "entidades": {...}}."""
 
         try:
             response = litellm.completion(
@@ -218,7 +243,7 @@ Classifique novamente o tipo e extraia as entidades com máxima precisão."""
                 max_tokens=500
             )
 
-            resultado = json.loads(response.choices[0].message.content)
+            resultado = _extrair_json(response.choices[0].message.content)
             self.tokens_usados += response.usage.completion_tokens
             self.falhas_consecutivas = 0
 

@@ -50,7 +50,9 @@ def coordenador(state: AgentState, mcp: MCPClient, clock: Clock) -> AgentState:
     try:
         # Obter próximo evento
         logger.info("Aguardando próximo evento...")
-        resposta = mcp.proximo_evento(esperar_segundos=30)
+        # Long-poll: o servidor segura a resposta até chegar evento ou passar
+        # esse tempo. Deve ficar abaixo do timeout HTTP do MCPClient (15 s).
+        resposta = mcp.proximo_evento(esperar_segundos=10)
 
         # Verificar se cenário encerrou
         if resposta.get("encerrado"):

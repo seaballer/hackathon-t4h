@@ -67,7 +67,8 @@ def criar_grafo(mcp: MCPClient, llm: LLMClient, clock: Clock,
             return END
         if state.get("evento"):
             return "analista"
-        return "coordenador"
+        # Se não há evento, encerra o processamento
+        return END
 
     workflow.add_conditional_edges("coordenador", deve_analisar)
 
