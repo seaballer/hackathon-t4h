@@ -4,8 +4,14 @@ Grafo LangGraph: orquestração dos agentes.
 
 import logging
 from typing import Dict, Any
-from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import StateGraph, END  # type : ignore
+try:
+    from langgraph_checkpoint.sqlite import SqliteSaver
+except ImportError:
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+    except ImportError:
+        SqliteSaver = None
 
 from .state import AgentState
 from .agents import coordenador, analista, revisor, executor
@@ -80,8 +86,11 @@ def criar_grafo(mcp: MCPClient, llm: LLMClient, clock: Clock,
     workflow.add_edge("executor", "coordenador")
 
     # Compilar com checkpoint
-    checkpointer = SqliteSaver(checkpoint_dir)
-    graph = workflow.compile(checkpointer=checkpointer)
+    if SqliteSaver is not None:
+        checkpointer = SqliteSaver(checkpoint_dir)
+        graph = workflow.compile(checkpointer=checkpointer)
+    else:
+        graph = workflow.compile()
 
     logger.info("Grafo LangGraph criado com sucesso")
 

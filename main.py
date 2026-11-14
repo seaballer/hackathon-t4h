@@ -34,7 +34,17 @@ def main():
     """Função principal."""
 
     # Carregar variáveis de ambiente
-    load_dotenv()
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    logger.info(f"Carregando .env de: {env_path}")
+    load_dotenv(env_path)
+
+    # Verificar se OPENAI_API_KEY foi carregado
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        logger.info(f"[OK] OPENAI_API_KEY carregado: {api_key[:10]}...")
+    else:
+        logger.warning(
+            "[WARN] OPENAI_API_KEY não encontrado - usando modo offline")
 
     # Argumentos
     parser = argparse.ArgumentParser(

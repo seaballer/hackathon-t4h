@@ -14,15 +14,36 @@ logger = logging.getLogger(__name__)
 class LLMClient:
     """Cliente para chamadas ao LLM com cache e fallback."""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini", offline: bool = False):
         """
         Args:
             api_key: chave da API OpenAI (padrão: variável de ambiente)
             model: modelo a usar
+            offline: se True, usa fallback sem chamar OpenAI
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.model = model
-        self.client = OpenAI(api_key=self.api_key)
+
+        # Detecta modo offline se:
+        # - offline=True, ou
+        # - não há chave, ou
+        # - chave começa com "sk-test"
+        self.offline = offline or not self.api_key or (
+            self.api_key and self.api_key.startswith("sk-test"))
+
+        if not self.offline and self.api_key and not self.api_key.startswith("sk-test"):
+            try:
+                self.client = OpenAI(api_key=self.api_key)
+            except Exception as e:
+                logger.warning(
+                    f"Erro ao inicializar OpenAI: {e}. Usando fallback.")
+                self.offline = True
+                self.client = None
+        else:
+            self.client = None
+            if self.offline:
+                logger.warning("LLMClient em modo offline - usando fallback")
+
         self.tokens_usados = 0
         self.falhas_consecutivas = 0
 
@@ -61,6 +82,11 @@ reserva_kit, troca_defeito, emprestimo, entrada_pessoa, saida_pessoa, baixa, ent
 
 Regras de negócio:
 {json.dumps(regras, indent=2, ensure_ascii=False)}"""
+
+        # Se offline, usar fallback direto
+        if self.offline:
+            logger.info("Usando fallback (modo offline)")
+            return self._classificar_fallback(evento)
 
         try:
             response = self.client.chat.completions.create(
