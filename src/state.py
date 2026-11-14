@@ -34,16 +34,20 @@ class AgentState(TypedDict, total=False):
     evento: Dict[str, Any]  # payload do proximo_evento
     origem: str  # "cenario" | "painel" | "mundo"
 
-    # ===== Resultado do Analista =====
+    # ===== Resultado da Classificação =====
     tipo: str  # enum de 12 tipos
+    confianca: float  # Confiança da classificação (0.0-1.0)
     # patrimonio, colaborador_id, data, itens[], confianca
     entidades: Dict[str, Any]
     plano: List[PlanoAcao]  # [{tool, args, motivo, nivel}]
 
-    # ===== Resultado do Revisor =====
+    # ===== Resultado da Validação =====
+    bloqueios: List[str]  # razões de bloqueio
+    aprovado: bool  # Se foi aprovado para execução
+
+    # ===== Resultado do Revisor (compatibilidade) =====
     plano_aprovado: List[PlanoAcao]
     nivel_final: str  # FAZ_SOZINHO | PROPOE | ESCALA
-    bloqueios: List[str]  # razões de bloqueio
 
     # ===== Execução =====
     acoes_feitas: List[AcaoFeita]  # {tool, args, resultado, tokens}
