@@ -1,12 +1,12 @@
 """
-Integração com LLM (GPT-4o-mini) com cache de prompt e fallback.
+Integração com LLM (GPT-4o-mini) via LiteLLM com cache de prompt e fallback.
 """
 
 import os
 import json
 import logging
 from typing import Dict, Any, Optional, Tuple
-from openai import OpenAI
+import litellm
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +17,12 @@ class LLMClient:
     def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini", offline: bool = False):
         """
         Args:
-            api_key: chave da API OpenAI (padrão: variável de ambiente)
+            api_key: chave da API (padrão: variável de ambiente OPENAI_API_KEY)
             model: modelo a usar
-            offline: se True, usa fallback sem chamar OpenAI
+            offline: se True, usa fallback sem chamar LiteLLM
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.api_base = os.getenv("LITELLM_API_BASE")
         self.model = model
 
         # Detecta modo offline se:
@@ -33,14 +34,17 @@ class LLMClient:
 
         if not self.offline and self.api_key and not self.api_key.startswith("sk-test"):
             try:
-                self.client = OpenAI(api_key=self.api_key)
+                # Configura LiteLLM com a URL base e chave de API
+                if self.api_base:
+                    litellm.api_base = self.api_base
+                litellm.api_key = self.api_key
+                logger.info(
+                    f"LiteLLM configurado com base URL: {self.api_base}")
             except Exception as e:
                 logger.warning(
-                    f"Erro ao inicializar OpenAI: {e}. Usando fallback.")
+                    f"Erro ao inicializar LiteLLM: {e}. Usando fallback.")
                 self.offline = True
-                self.client = None
         else:
-            self.client = None
             if self.offline:
                 logger.warning("LLMClient em modo offline - usando fallback")
 
@@ -89,7 +93,7 @@ Regras de negócio:
             return self._classificar_fallback(evento)
 
         try:
-            response = self.client.chat.completions.create(
+            response = litellm.completion(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -166,7 +170,7 @@ Contexto: {json.dumps(contexto, indent=2, ensure_ascii=False)}
 Redija uma resposta apropriada."""
 
         try:
-            response = self.client.chat.completions.create(
+            response = litellm.completion(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -204,7 +208,7 @@ Motivo da reanalise: {motivo}
 Classifique novamente o tipo e extraia as entidades com máxima precisão."""
 
         try:
-            response = self.client.chat.completions.create(
+            response = litellm.completion(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
