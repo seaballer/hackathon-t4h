@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Colaborador Digital</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1d2330; --muted: #667085;
+    --border: #e3e6eb; --accent: #2f6fde; --accent-text: #ffffff;
+    --ok: #1f8a4c; --warn: #b26a00; --code-bg: #f0f2f5;
+    --t-evento: #2f6fde; --t-resposta: #1f8a4c; --t-mensagem: #7a4fd1;
+    --t-consulta: #667085; --t-atualizacao: #b26a00; --t-agentes: #c2410c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1a1e26; --text: #e6e9ef; --muted: #98a2b3;
+      --border: #2a303b; --accent: #5b8ff0; --accent-text: #0b0e13;
+      --ok: #4cc380; --warn: #e3a33b; --code-bg: #10131a;
+      --t-evento: #6f9cf2; --t-resposta: #4cc380; --t-mensagem: #a98bf0;
+      --t-consulta: #98a2b3; --t-atualizacao: #e3a33b; --t-agentes: #f08a5d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+           justify-content: space-between; padding: 16px 24px;
+           border-bottom: 1px solid var(--border); background: var(--card); }
+  h1 { font-size: 18px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--ok); }
+  main { display: grid; gap: 16px; padding: 16px 24px 32px;
+         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 16px; } header { padding: 16px; } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-width: 0; }
+  .card h2 { font-size: 14px; margin: 0 0 12px; display: flex; justify-content: space-between; gap: 8px; }
+  .card h2 small { color: var(--muted); font-weight: 400; }
+  .full { grid-column: 1 / -1; }
+  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 600px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; }
+  .kpi b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .kpi span { color: var(--muted); font-size: 12px; }
+  button { font: inherit; border: 1px solid var(--border); background: var(--card); color: var(--text);
+           border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button:disabled { opacity: .55; cursor: default; }
+  .acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+  form { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  form label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  form .full { grid-column: 1 / -1; }
+  input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+                  border-radius: 6px; padding: 6px 8px; width: 100%; }
+  ul.feed { list-style: none; margin: 0; padding: 0; max-height: 460px; overflow: auto; }
+  .feed li { padding: 8px 0; border-bottom: 1px solid var(--border); display: grid;
+             grid-template-columns: 64px 92px minmax(0, 1fr); gap: 8px; }
+  .feed li:last-child { border-bottom: 0; }
+  .hora { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; padding-top: 1px; }
+  .tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  .detalhe { color: var(--muted); font-size: 12px; word-break: break-word; white-space: pre-wrap; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .tabela { overflow-x: auto; }
+  pre { margin: 0; background: var(--code-bg); border-radius: 8px; padding: 12px; max-height: 360px;
+        overflow: auto; font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+  .vazio { color: var(--muted); font-size: 13px; }
+  .fila li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .fila { list-style: none; margin: 0 0 12px; padding: 0; }
+  #aviso { font-size: 12px; color: var(--muted); min-height: 18px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Colaborador Digital · Gestão de Equipamentos</h1>
+    <p>Time de agentes LangGraph: Coordenador → Analista → Revisor → Executor</p>
+  </div>
+  <div class="acoes">
+    <span class="status"><span id="dot" class="dot"></span><span id="status-txt">conectando…</span></span>
+    <button id="btn-rodar" class="primary">▶ Executar agentes</button>
+  </div>
+</header>
+
+<main>
+  <section class="kpis full">
+    <div class="kpi"><b id="k-fila">–</b><span>eventos na fila</span></div>
+    <div class="kpi"><b id="k-entregues">–</b><span>eventos entregues</span></div>
+    <div class="kpi"><b id="k-respostas">–</b><span>respostas enviadas</span></div>
+    <div class="kpi"><b id="k-acoes">–</b><span>atualizações feitas</span></div>
+  </section>
+
+  <section class="card">
+    <h2>Atividade dos agentes <small>atualiza a cada 2 s</small></h2>
+    <ul id="feed" class="feed"></ul>
+  </section>
+
+  <section class="card">
+    <h2>Fila de eventos</h2>
+    <ul id="fila" class="fila"></ul>
+    <h2>Novo evento</h2>
+    <form id="form-evento">
+      <label>Nome <input name="nome" value="Colaborador Exemplo" required></label>
+      <label>E-mail <input name="de" value="colaborador@t4h.exemplo" required></label>
+      <label class="full">Assunto <input name="assunto" placeholder="Ex.: Notebook não liga" required></label>
+      <label class="full">Mensagem <input name="corpo" placeholder="Ex.: Meu notebook PAT-001 não liga desde ontem." required></label>
+      <div class="full acoes">
+        <button type="submit">+ Adicionar à fila</button>
+      </div>
+    </form>
+    <div id="aviso"></div>
+  </section>
+
+  <section class="card">
+    <h2>Inventário</h2>
+    <div class="tabela"><table><thead><tr><th>Patrimônio</th><th>Item</th><th>Status</th><th>Colaborador</th><th>Aquisição</th></tr></thead>
+    <tbody id="inventario"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Log dos agentes <small>agentes.log</small></h2>
+    <pre id="log">carregando…</pre>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const cores = { evento: "--t-evento", resposta: "--t-resposta", mensagem: "--t-mensagem",
+                consulta: "--t-consulta", atualizacao: "--t-atualizacao", agentes: "--t-agentes" };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (d) => d == null ? "" : (typeof d === "string" ? d : JSON.stringify(d));
+let rodando = false;
+
+async function atualizar() {
+  try {
+    const r = await fetch("/api/estado");
+    const e = await r.json();
+    $("dot").className = "dot on";
+    rodando = e.agentes_rodando;
+    $("status-txt").textContent = rodando ? "agentes rodando…" : "servidor online";
+    $("btn-rodar").disabled = rodando;
+
+    const at = e.atividades;
+    $("k-fila").textContent = e.fila.length;
+    $("k-entregues").textContent = at.filter(a => a.titulo.includes("entregue")).length;
+    $("k-respostas").textContent = at.filter(a => a.tipo === "resposta" || a.tipo === "mensagem").length;
+    $("k-acoes").textContent = at.filter(a => a.tipo === "atualizacao").length;
+
+    $("feed").innerHTML = at.length ? at.map(a => `
+      <li><span class="hora">${esc(a.hora)}</span>
+          <span class="tag" style="color:var(${cores[a.tipo] || "--muted"})">${esc(a.tipo)}</span>
+          <span><div>${esc(a.titulo)}</div>${a.detalhe != null ? `<div class="detalhe">${esc(fmt(a.detalhe))}</div>` : ""}</span></li>`).join("")
+      : `<li class="vazio" style="display:block">Nada ainda. Clique em “Executar agentes”.</li>`;
+
+    $("fila").innerHTML = e.fila.length ? e.fila.map(ev =>
+      `<li><b>${esc(ev.id)}</b> · ${esc(ev.nome)} — ${esc(ev.assunto)}<div class="detalhe">${esc(ev.corpo)}</div></li>`).join("")
+      : `<li class="vazio">Fila vazia.</li>`;
+
+    $("inventario").innerHTML = Object.entries(e.inventario).map(([pat, i]) =>
+      `<tr><td><b>${esc(pat)}</b></td><td>${esc(i.nome ?? "")}</td><td>${esc(i.status ?? "")}</td>
+           <td>${esc(i.colaborador_id ?? "")}</td><td>${esc(i.data_aquisicao ?? "")}</td></tr>`).join("");
+
+    const logEl = $("log");
+    const noFim = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 10;
+    logEl.textContent = e.log.length ? e.log.join("\n") : "Sem log ainda (agentes.log aparece após a primeira execução).";
+    if (noFim) logEl.scrollTop = logEl.scrollHeight;
+  } catch {
+    $("dot").className = "dot";
+    $("status-txt").textContent = "servidor fora do ar";
+  }
+}
+
+$("btn-rodar").onclick = async () => {
+  $("btn-rodar").disabled = true;
+  const r = await fetch("/api/executar_agentes?max_eventos=1", { method: "POST" });
+  $("aviso").textContent = r.ok ? "Agentes iniciados. Acompanhe na atividade e no log." : "Os agentes já estão rodando.";
+  atualizar();
+};
+
+$("form-evento").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const dados = Object.fromEntries(new FormData(ev.target));
+  const r = await fetch("/api/eventos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados) });
+  const novo = await r.json();
+  $("aviso").textContent = `Evento ${novo.id} adicionado à fila.`;
+  ev.target.assunto.value = ""; ev.target.corpo.value = "";
+  atualizar();
+};
+
+atualizar();
+setInterval(atualizar, 2000);
+</script>
+</body>
+</html>
